@@ -71,7 +71,8 @@ async def run_debate(session: Session, agents: list[Agent], repo,
                 emit(rnd, EventType.tool_result,
                      {"tool": t.tool_call.get("tool"), "result": result},
                      agent_id=a.id, parent=tc.id)
-            emit(rnd, EventType.position_update, t.position.model_dump(),
+            delta = round(t.position.score - positions[a.id].score, 2)
+            emit(rnd, EventType.position_update, {**t.position.model_dump(), "delta": delta},
                  agent_id=a.id, influenced=t.influenced_by)
             repo.save_position(session.id, rnd, a.id, t.position)
             positions[a.id] = t.position

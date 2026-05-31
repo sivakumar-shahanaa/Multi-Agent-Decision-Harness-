@@ -11,3 +11,7 @@ sse-starlette
 python-dotenv
 httpx
 pyjwt
+
+# dev
+pytest
+pytest-asyncio

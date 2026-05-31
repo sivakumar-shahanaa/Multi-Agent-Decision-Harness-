@@ -37,9 +37,11 @@ def _influence(agents: list[Agent], events: list[Event]):
     edges: dict[tuple[str, str], float] = defaultdict(float)
     for ev in events:
         if ev.type == EventType.position_update and ev.influenced_by:
+            # how much this agent moved this round = strength of the influence on it
+            w = abs(float(ev.content.get("delta") or 0)) or 0.5
             for src in ev.influenced_by:
-                out[src] += 1
-                edges[(src, ev.agent_id)] += 1.0
+                out[src] += w
+                edges[(src, ev.agent_id)] += w
     total = sum(out.values()) or 1
     ranking = [InfluenceScore(agent_id=a.id, influence=round(out.get(a.id, 0) / total, 3))
                for a in agents]

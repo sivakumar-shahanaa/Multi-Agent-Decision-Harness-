@@ -10,6 +10,7 @@ the integration seam is [docs/CONTRACT.md](docs/CONTRACT.md).
 - Real tool_call→tool_result loop (`engine/tools.py` stubs; swap for MCP).
 - `personas/` auto-seeds the **Judge Panel** org (Nico, Ryan, Uma, Ra'ad, Skeptic) with parsed weights.
 - Weave: every engine step is `@weave.op()` and auto-traces the model calls. Auth + IDOR hardened.
+- **AI org-builder** (`POST /orgs/generate`) builds a custom panel from a prompt; **Weave Evaluation** harness (`python -m backend.evaluation`) scores verdicts with 4 scorers → leaderboard; **pytest** suite (`python -m pytest`, 8 tests, no network).
 
 ## Run the backend (no keys needed)
 ```bash
