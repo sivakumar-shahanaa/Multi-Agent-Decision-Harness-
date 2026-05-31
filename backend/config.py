@@ -3,6 +3,7 @@
 Everything degrades gracefully: the app boots even when keys are missing so
 the team can run `GET /health` on day one before all accounts are provisioned.
 """
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -33,8 +34,11 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     frontend_origin: str = "http://localhost:3000"
-    # Vercel project slug used to pin the CORS origin regex (see cors_origin_regex).
-    frontend_vercel_slug: str = "decision-harness"
+    # Vercel project + team slugs used to pin the CORS origin regex (see
+    # cors_origin_regex). The team slug is reserved to us by Vercel, so pinning
+    # it stops a look-alike third-party project from matching.
+    frontend_vercel_slug: str = "decisive"
+    frontend_vercel_team: str = "yamanns"
 
     # --- Auth posture ---
     # Local dev only: allow requests with no Authorization header (treated as the
@@ -71,13 +75,17 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_regex(self) -> str:
-        # Vercel serves this project under a stable alias AND per-deploy/preview
-        # URLs (decision-harness.vercel.app, decision-harness-<hash>-<scope>.vercel.app).
-        # Pin to THIS project's slug so we don't trust arbitrary third-party
-        # *.vercel.app origins (credentials are allowed). localhost stays in
-        # cors_origins. Override the slug via FRONTEND_VERCEL_SLUG if it changes.
-        slug = self.frontend_vercel_slug
-        return rf"https://{slug}(-[a-z0-9-]+)?\.vercel\.app"
+        # Vercel preview / per-deploy URLs look like
+        #   <project>-<hash>-<team>.vercel.app   (e.g. decisive-3hpw9j94q-yamanns.vercel.app)
+        # Pin BOTH the project slug and the team slug. The team slug is reserved
+        # to us by Vercel, so an attacker who registers a `decisive-*` project
+        # under their own team can't produce a matching origin (credentials are
+        # allowed, so a loose `*.vercel.app` regex would be a real CORS hole).
+        # The clean production alias (e.g. decisiveai.vercel.app, which carries
+        # no team segment) is allow-listed exactly via frontend_origin instead.
+        slug = re.escape(self.frontend_vercel_slug)
+        team = re.escape(self.frontend_vercel_team)
+        return rf"https://{slug}[a-z0-9-]*-{team}\.vercel\.app"
 
 
 @lru_cache
