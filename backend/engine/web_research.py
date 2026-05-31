@@ -21,6 +21,7 @@ from typing import Optional, Protocol
 import weave
 
 from ..config import get_settings
+from ..safeurl import UnsafeURLError, safe_outbound_url
 
 
 # ───────────────────────── provider interface ─────────────────────────
@@ -118,7 +119,10 @@ class TavilyProvider:
     async def fetch(self, url: str) -> dict:
         import httpx
 
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+        # Direct server-side GET → SSRF surface. The caller (fetch_url) has already
+        # run safe_outbound_url; keep redirects OFF so a 30x can't bounce to an
+        # internal host after the check.
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as c:
             r = await c.get(url)
             return {"url": url, "title": "", "markdown": r.text[:4000]}
 
@@ -165,6 +169,10 @@ async def fetch_url(args: dict, ctx) -> dict:
     url = str(args.get("url", "")).strip()
     if not url:
         return {"error": "fetch_url needs a 'url'"}
+    try:  # SSRF guard: agent-supplied URL must not reach internal/metadata hosts
+        await safe_outbound_url(url)
+    except UnsafeURLError as e:
+        return {"error": f"refusing to fetch unsafe URL: {e}", "url": url}
     return await provider.fetch(url)
 
 

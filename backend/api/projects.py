@@ -16,6 +16,7 @@ from ..db.repository import get_repo
 from ..db.storage import get_storage
 from ..engine import stream
 from ..engine.ingest.brief import run_extraction
+from ..safeurl import UnsafeURLError, validate_url_static
 from ..schemas import (CreateProjectResponse, Project, ProjectDetail,
                        ProjectStatus, SourceKind, UpdateProjectRequest)
 from .deps import (get_current_user, get_current_user_sse,
@@ -64,6 +65,11 @@ async def create_project(
 ):
     if not files and not url.strip():
         raise HTTPException(400, "attach at least one PDF/MP4 file or a URL")
+    if url.strip():  # SSRF/defense-in-depth: reject file://, userinfo, internal hosts
+        try:
+            validate_url_static(url.strip())
+        except UnsafeURLError as e:
+            raise HTTPException(400, f"unsafe URL: {e}")
     repo, storage = get_repo(), get_storage()
     default_name = (name.strip() or (files[0].filename if files else "")
                     or url.strip() or "Untitled project")
