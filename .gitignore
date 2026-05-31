@@ -10,6 +10,11 @@ wandb/
 node_modules/
 .next/
 frontend/.env.local
+*.tsbuildinfo
+
+# deploy CLI link state (project-local; not shared)
+.vercel/
+.railway/
 
 # misc
 voice/out/
