@@ -10,7 +10,7 @@ from ..schemas import AgentCreate, Provider
 from .llm import complete_json, resolve_backend
 from .prompts import ORG_BUILDER_PROMPT, ORG_BUILDER_SCHEMA
 
-_DEFAULT_MODEL = "claude-sonnet-4-6"
+_DEFAULT_MODEL = "openai/gpt-oss-120b"  # W&B Inference; no Anthropic
 
 
 def _to_agents(raw: list[dict]) -> list[AgentCreate]:
@@ -22,7 +22,7 @@ def _to_agents(raw: list[dict]) -> list[AgentCreate]:
             role=str(a.get("role", "Panelist")),
             system_prompt=str(a.get("system_prompt", "")),
             weight=round(max(0.0, float(a.get("weight", 1))) / total, 3),
-            provider=Provider.anthropic, position=i, tools=["research"],
+            model=_DEFAULT_MODEL, provider=Provider.wandb, position=i, tools=["research"],
         ))
     return agents
 
@@ -47,7 +47,7 @@ def _fallback_team(prompt: str) -> dict:
 
 async def generate_org_agents(prompt: str) -> dict:
     """Returns {org_name, description, agents: [AgentCreate]}."""
-    backend = resolve_backend("anthropic")
+    backend = resolve_backend("wandb")
     if backend is None:
         return _fallback_team(prompt)
     try:
