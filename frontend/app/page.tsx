@@ -12,6 +12,7 @@ import { HITL } from "../components/HITL";
 import { InfluenceGraph } from "../components/InfluenceGraph";
 import { Inspector } from "../components/Inspector";
 import { OrgBuilder } from "../components/OrgBuilder";
+import { ProjectBrief } from "../components/ProjectBrief";
 import { VerdictPanel } from "../components/Verdict";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -41,6 +42,7 @@ export default function Home() {
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [builderOpen, setBuilderOpen] = useState(false);
   const [rerunning, setRerunning] = useState(false);
+  const [briefProjectId, setBriefProjectId] = useState<string | null>(null);
 
   const bootstrap = useCallback(() => {
     setHealthError(false); setHealth("connecting…");
@@ -109,7 +111,11 @@ export default function Home() {
     if (demo) { setDemoKey((k) => k + 1); return; }
     setWeaveUrl(null);
     setSessionId(null);
-    const { session_id } = await api.createSession({ org_id: orgId, question, rounds, context: context || undefined });
+    const { session_id } = await api.createSession({
+      org_id: orgId, question, rounds,
+      context: context || undefined,
+      project_id: briefProjectId || undefined,
+    });
     setSessionId(session_id);
   }
 
@@ -166,6 +172,15 @@ export default function Home() {
         healthMsg={health}
         onRetry={bootstrap}
       />
+
+      {!demo && (
+        <ProjectBrief
+          attachedId={briefProjectId}
+          onAttach={(id) => setBriefProjectId(id)}
+          onClear={() => setBriefProjectId(null)}
+          disabled={healthError}
+        />
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 22, marginTop: 22 }}>
         <Boardroom agents={agents} board={board} />
