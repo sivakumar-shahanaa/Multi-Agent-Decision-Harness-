@@ -13,7 +13,7 @@ import weave
 
 import agents
 import db
-from llm import chat
+from llm import ROUTER_MODEL, chat
 
 
 @weave.op
@@ -36,7 +36,12 @@ def opening_statements(record: dict) -> list[dict]:
 
 @weave.op
 def route(question: str, record: dict) -> int:
-    """Delegate a question to the juror who owns it. Returns the seat index."""
+    """The chair agent delegates the question to the juror who owns it.
+
+    Returns a seat index. The agent decides; parsing only translates its answer
+    back to an index. If the agent's reply is unusable we default to the
+    heaviest-weighted juror (general — no hardcoded topics).
+    """
     jurors = record.get("jurors", [])
     if not jurors:
         return 0
@@ -48,15 +53,21 @@ def route(question: str, record: dict) -> int:
     sys = (
         "You are the chair of a decision jury. Route the question to the single juror best "
         "suited to answer it, based on their role and stated position. Reply with ONLY the "
-        "juror's number, nothing else."
+        "juror's number (e.g. `2`), nothing else."
     )
-    user = f"Jurors:\n{catalog}\n\nQuestion: {question}\n\nJuror number:"
-    raw = chat(sys, user, temperature=0.0, max_tokens=6)
-    digits = "".join(c for c in raw if c.isdigit())
-    if digits and int(digits) < len(jurors):
-        return int(digits)
-    # Fallback: the most decisive (lowest score) juror.
-    return min(_indexed(record), key=lambda iv: iv[1].get("score", 10))[0]
+    user = f"Jurors:\n{catalog}\n\nQuestion: {question}\n\nAnswer with one number:"
+    # Fast instruct model answers the classification directly (no reasoning preamble).
+    raw = chat(sys, user, model=ROUTER_MODEL, temperature=0.0, max_tokens=8)
+    for tok in raw.replace(".", " ").replace("#", " ").split():
+        if tok.isdigit() and int(tok) < len(jurors):
+            return int(tok)
+    # The agent named the juror instead of numbering it.
+    low = raw.lower()
+    for i, j in _indexed(record):
+        if j.get("name", "").lower() in low:
+            return i
+    # Unusable reply -> heaviest-weighted juror (general fallback).
+    return max(_indexed(record), key=lambda iv: iv[1].get("weight", 0))[0]
 
 
 @weave.op

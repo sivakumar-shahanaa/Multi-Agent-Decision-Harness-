@@ -50,7 +50,8 @@ def score_faithfulness(output: dict) -> dict:
         f"RATIONALE:\n{output.get('_rationale', '')}\n\n"
         f"ANSWER:\n{output.get('text', '')}\n\nJSON:"
     )
-    raw = chat(sys, user, temperature=0.0, max_tokens=160)
+    # Generous budget: gpt-oss is a reasoning model and burns tokens before the JSON.
+    raw = chat(sys, user, temperature=0.0, max_tokens=450)
     try:
         data = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
         return {"faithful": float(data.get("faithful", 0.0)), "reason": data.get("reason", "")}

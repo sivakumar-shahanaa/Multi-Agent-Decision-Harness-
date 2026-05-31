@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import weave
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -80,3 +80,11 @@ def meeting_ask(req: AskReq) -> dict:
     record = _record(req.meeting_id)
     turn = voice.voice_turn(orchestrator.ask(req.question, record))
     return turn
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)) -> dict:
+    """Mic input -> ElevenLabs Scribe STT -> the question text the UI then asks."""
+    data = await audio.read()
+    text = voice.transcribe(data, filename=audio.filename or "question.webm")
+    return {"text": text}

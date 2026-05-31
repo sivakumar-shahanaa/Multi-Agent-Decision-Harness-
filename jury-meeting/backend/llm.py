@@ -16,10 +16,15 @@ load_dotenv()
 WANDB_BASE_URL = "https://api.inference.wandb.ai/v1"
 
 # Team-shared config (matches the other team's .env so traces land in one project).
-WANDB_ENTITY = os.getenv("WANDB_ENTITY", "yamanbicer-mindra")
+WANDB_ENTITY = os.getenv("WANDB_ENTITY", "")
 WANDB_PROJECT = os.getenv("WANDB_PROJECT", "company-brain-harness")
-PROJECT_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}"
-DEFAULT_MODEL = os.getenv("WANDB_INFERENCE_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+# entity/project for Weave + Inference; project alone lets W&B infer the default entity.
+PROJECT_PATH = f"{WANDB_ENTITY}/{WANDB_PROJECT}" if WANDB_ENTITY else WANDB_PROJECT
+DEFAULT_MODEL = os.getenv("WANDB_INFERENCE_MODEL", "Qwen/Qwen3-235B-A22B-Instruct-2507")
+# Routing is classification, not generation: use a fast INSTRUCT model that answers
+# directly. A reasoning model (e.g. gpt-oss) burns its budget thinking and returns
+# nothing parseable for a one-token answer.
+ROUTER_MODEL = os.getenv("WANDB_ROUTER_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
 
 
 @lru_cache(maxsize=1)

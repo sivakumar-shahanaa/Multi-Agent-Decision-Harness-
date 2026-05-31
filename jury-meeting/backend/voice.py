@@ -6,7 +6,9 @@ re-runs are instant and the API serves stable filenames.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -57,24 +59,44 @@ def speak(text: str, voice_id: str) -> str:
         client = _get_client()
     except RuntimeError:
         return ""  # no key -> text-only mode
-    audio = client.text_to_speech.convert(
-        text=text,
-        voice_id=voice_id,
-        model_id=TTS_MODEL,
-        output_format="mp3_44100_128",
-    )
-    with open(path, "wb") as f:
-        for chunk in audio:
-            if chunk:
-                f.write(chunk)
-    return path.name
+
+    # Starter-tier ElevenLabs rate-limits rapid/concurrent calls (the 5 openings
+    # fire back-to-back). Retry transient errors with backoff; give up fast on a
+    # real quota cap (no point retrying) and degrade to text-only.
+    for attempt in range(4):
+        try:
+            audio = client.text_to_speech.convert(
+                text=text,
+                voice_id=voice_id,
+                model_id=TTS_MODEL,
+                output_format="mp3_44100_128",
+            )
+            with open(path, "wb") as f:
+                for chunk in audio:
+                    if chunk:
+                        f.write(chunk)
+            return path.name
+        except Exception as e:  # noqa: BLE001
+            path.unlink(missing_ok=True)
+            body = str(getattr(e, "body", "")) + str(e)
+            if "quota_exceeded" in body:
+                print("[voice] ElevenLabs per-key credit cap hit; text-only.")
+                return ""
+            if attempt < 3:
+                time.sleep(1.5 * (attempt + 1))  # backoff on rate-limit/transient
+                continue
+            print(f"[voice] TTS failed ({type(e).__name__}); text-only.")
+            return ""
+    return ""
 
 
-def transcribe(audio_bytes: bytes) -> str:
-    """Scribe STT for spoken applicant questions (stretch / mic input)."""
+def transcribe(audio_bytes: bytes, filename: str = "question.webm") -> str:
+    """Scribe STT for spoken applicant questions (mic input)."""
     client = _get_client()
-    result = client.speech_to_text.convert(file=audio_bytes, model_id=STT_MODEL)
-    return getattr(result, "text", "") or ""
+    bio = io.BytesIO(audio_bytes)
+    bio.name = filename  # the SDK uses the extension to sniff the format
+    result = client.speech_to_text.convert(file=bio, model_id=STT_MODEL)
+    return (getattr(result, "text", "") or "").strip()
 
 
 def voice_turn(turn: dict) -> dict:
