@@ -100,7 +100,7 @@ function Row({ e, meta }: { e: DHEvent; meta: Record<string, { name: string; hue
       case "tool_result": return <span>↳ <b className="mono">{c.tool}</b> → <span className="muted">{String(c.result).slice(0, 220)}</span></span>;
       case "orchestrator": return <span className="muted">{c.action?.toUpperCase()} · conflict {c.conflict_level} — {c.note}</span>;
       case "verdict": return <span style={{ color: "var(--ember)" }}>⚖ verdict rendered</span>;
-      case "error": return <span style={{ color: "var(--no)" }}>{c.message ?? "error"}</span>;
+      case "error": return <span style={{ color: "var(--no)" }}>{c.message ?? c.error ?? "error"}</span>;
       default: return <span className="faint">{JSON.stringify(c).slice(0, 160)}</span>;
     }
   })();
