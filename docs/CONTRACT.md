@@ -37,11 +37,26 @@ Every event also has: `id, session_id, seq (global order), round, agent_id?, par
 | GET | `/orgs/{id}/agents` | — | `[Agent]` |
 | POST | `/orgs/{id}/agents` | `AgentCreate` | `Agent` |
 | PATCH | `/agents/{id}` | `AgentUpdate` | `Agent` |
-| POST | `/sessions` | `{org_id, question, context?, rounds?}` | `{session_id}` |
+| POST | `/sessions` | `{org_id, question, context?, rounds?, project_id?}` | `{session_id}` |
 | GET | `/sessions/{id}` | — | `{session, events, positions, verdict}` |
 | GET | `/sessions/{id}/stream` | SSE | `event:<type> data:<event json>` (replays history then goes live; ends with `event:done`) |
 | POST | `/sessions/{id}/rerun` | `{weights_override?, context?}` | `{session_id}` (child session) |
 | GET | `/sessions/{id}/influence` | — | `{nodes:[{agent_id,name,weight,influence}], edges:[{from,to,weight}]}` |
+| POST | `/projects` | **multipart**: `name?`, `url?`, `files[]` (.pdf/.mp4) | `{project_id}` |
+| GET | `/projects` | — | `[Project]` |
+| GET | `/projects/{id}` | — | `{project, sources:[ProjectSource]}` |
+| PATCH | `/projects/{id}` | `{name?, brief_text?}` | `Project` |
+| GET | `/projects/{id}/stream` | SSE | `event:extraction data:{content:{stage,detail,progress}}`; ends with `event:done` |
+
+### Project brief (multimodal context)
+Upload a deck (PDF), demo video (MP4), and/or a website URL → a background pipeline
+extracts one reusable **Brief** that becomes a session's `context` when `project_id` is
+passed to `/sessions`. Extraction is gated + graceful: with no keys it yields a mock brief.
+
+- **Project** `{id, owner_id, name, status:"pending"|"extracting"|"ready"|"failed", brief?:Brief, brief_text?, error?, created_at}`
+- **Brief** `{title, one_liner, problem, solution, market, traction, tech, business_model, team, risks:[str], asks:[str], summary}`
+- **ProjectSource** `{id, project_id, kind:"pdf"|"video"|"url", filename, content_type?, storage_path?, content_hash?, bytes, extracted?, created_at}`
+- `extraction` is a **project-stream** SSE event (`{stage, detail, progress}`), *not* a session `events.type`.
 
 ## Streaming
 The engine `publish()`es each event to in-process subscribers; `/stream` drains them as SSE.

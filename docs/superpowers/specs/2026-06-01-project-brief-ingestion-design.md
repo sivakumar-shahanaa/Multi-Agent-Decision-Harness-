@@ -25,6 +25,7 @@ The project's substance lives in two artifacts founders already have: a **slide 
 | Decision | Choice | Why |
 |---|---|---|
 | Extraction fidelity | **Full multimodal** | PDF text + slide vision + video transcript + sampled keyframes. |
+| Third source (added) | **Website URL via Firecrawl** | Optional `kind="url"` source — scrape a landing page to markdown (reuses `firecrawl_api_key`, called over httpx) and fold it into the same brief. Added because the user provisioned a Firecrawl key. Degrades to '' with no key. |
 | Relationship to debates | **Reusable, first-class Project Brief** | One project, many questions/councils. Pay extraction once; re-ask freely. Fits the "fully-inspectable" ethos. |
 | Vision (slides + frames) | **W&B Inference `google/gemma-4-31B-it`** (primary), `moonshotai/Kimi-K2.6` (fallback) | Llama-4-Scout is **gone** from the live catalog (verified: 25 models, 404 on Scout). Both chosen models read base64 images + JSON-mode cleanly through the installed `openai 2.38.0`. **Qwen vision avoided** — it trips a `NoneType` parse bug in that SDK version. |
 | Audio transcription (ASR) | **Groq Whisper `whisper-large-v3-turbo`** (primary) → **ElevenLabs Scribe** (existing, fallback) → mock | User added a `GROQ` key. Groq = audio **only**; never touches agents. Scribe is already built ([transcription.py](../../../backend/engine/transcription.py)) — kept free as a no-ffmpeg fallback. |
