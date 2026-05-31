@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Optional
 
 import jwt  # PyJWT
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 from jwt import PyJWKClient
 
 from ..config import get_settings
@@ -39,27 +39,41 @@ def _verify_token(token: str, jwks_url: str) -> dict:
                       audience="authenticated")
 
 
-def get_current_user(authorization: Optional[str] = Header(default=None)) -> str:
+def _subject_from_token(token: str) -> str:
+    """Verify a presented token against the project JWKS and return its subject."""
     s = get_settings()
+    if not s.auth_enabled:
+        # No project to verify against — refuse rather than trust blindly.
+        raise HTTPException(status_code=401, detail="token verification not configured")
+    try:
+        claims = _verify_token(token, s.jwks_url)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="token missing subject")
+    return sub
 
-    if authorization:
-        token = authorization.removeprefix("Bearer ").strip()
-        if not s.auth_enabled:
-            # No project to verify against — refuse rather than trust blindly.
-            raise HTTPException(status_code=401, detail="token verification not configured")
-        try:
-            claims = _verify_token(token, s.jwks_url)
-        except Exception as exc:
-            raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
-        sub = claims.get("sub")
-        if not sub:
-            raise HTTPException(status_code=401, detail="token missing subject")
-        return sub
 
-    # No Authorization header.
-    if s.dev_unauthenticated and not s.auth_enabled:
+def _resolve_user(token: Optional[str]) -> str:
+    """Shared policy: a presented token is always verified; a missing one is the
+    demo user only in local dev (auth not configured), else 401."""
+    if token:
+        return _subject_from_token(token)
+    if get_settings().dev_unauthenticated and not get_settings().auth_enabled:
         return DEMO_USER_ID
     raise HTTPException(status_code=401, detail="authentication required")
+
+
+def get_current_user(authorization: Optional[str] = Header(default=None)) -> str:
+    token = authorization.removeprefix("Bearer ").strip() if authorization else None
+    return _resolve_user(token)
+
+
+def get_current_user_sse(request: Request) -> str:
+    """Auth for the SSE stream: EventSource can't set headers, so the access token
+    arrives as the `?access_token=` query param. Verified identically."""
+    return _resolve_user(request.query_params.get("access_token"))
 
 
 def require_org_access(repo, org_id: str, user: str):

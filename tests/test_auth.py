@@ -75,3 +75,30 @@ def test_missing_token_when_auth_enabled_is_401(auth_on):
     with pytest.raises(HTTPException) as e:
         deps.get_current_user(None)
     assert e.value.status_code == 401
+
+
+# --- SSE stream auth (token via ?access_token= query param) ---
+
+class _Req:
+    """Minimal stand-in for starlette Request: only query_params is read."""
+    def __init__(self, access_token=None):
+        self.query_params = {"access_token": access_token} if access_token else {}
+
+
+def test_sse_valid_query_token_returns_subject(auth_on):
+    token = _mint(auth_on, sub="streamer")
+    assert deps.get_current_user_sse(_Req(token)) == "streamer"
+
+
+def test_sse_missing_query_token_is_401(auth_on):
+    with pytest.raises(HTTPException) as e:
+        deps.get_current_user_sse(_Req(None))
+    assert e.value.status_code == 401
+
+
+def test_sse_invalid_query_token_is_401(auth_on):
+    token = _mint(auth_on)
+    bad = token[:-3] + ("aaa" if not token.endswith("aaa") else "bbb")
+    with pytest.raises(HTTPException) as e:
+        deps.get_current_user_sse(_Req(bad))
+    assert e.value.status_code == 401

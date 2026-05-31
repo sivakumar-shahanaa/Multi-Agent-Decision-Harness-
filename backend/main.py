@@ -60,10 +60,3 @@ def health():
         "auth": settings.auth_enabled,
         "repo": "supabase" if get_supabase() else "in-memory",
     }
-
-
-@app.post("/seed/judges", tags=["dev"])
-def seed_judges():
-    """Dev helper: (re)seed the Judge Panel org from personas/."""
-    org = seed_judge_panel(get_repo(), DEMO_USER_ID)
-    return {"seeded": bool(org), "org_id": org.id if org else None}
