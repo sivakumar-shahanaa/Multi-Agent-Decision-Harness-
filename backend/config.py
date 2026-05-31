@@ -4,12 +4,18 @@ Everything degrades gracefully: the app boots even when keys are missing so
 the team can run `GET /health` on day one before all accounts are provisioned.
 """
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Always read backend/.env, even when uvicorn is launched from the repo root
+# (per START_HERE: `uvicorn backend.main:app`). A bare ".env" would resolve
+# against the launch CWD and miss this file. Process env still overrides it.
+_ENV_FILE = Path(__file__).resolve().parent / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     # --- W&B / Weave (already provisioned, see main repo .env) ---
     wandb_api_key: str = ""
@@ -24,14 +30,13 @@ class Settings(BaseSettings):
     # --- Supabase (Postgres + Auth) ---
     supabase_url: str = ""
     supabase_service_key: str = ""                 # server-side only
-    supabase_jwt_secret: str = ""                  # to verify frontend JWTs
 
     # --- CORS ---
     frontend_origin: str = "http://localhost:3000"
 
     # --- Auth posture ---
     # Local dev only: allow requests with no Authorization header (treated as the
-    # demo user). IGNORED once auth_enabled (a JWT secret is set) — then a valid
+    # demo user). IGNORED once auth_enabled (Supabase is configured) — then a valid
     # token is always required. Set False in any shared/hosted environment.
     dev_unauthenticated: bool = True
 
@@ -48,8 +53,15 @@ class Settings(BaseSettings):
         return bool(self.supabase_url and self.supabase_service_key)
 
     @property
+    def jwks_url(self) -> str:
+        # Supabase publishes its asymmetric (ES256) public signing keys here.
+        return f"{self.supabase_url}/auth/v1/.well-known/jwks.json"
+
+    @property
     def auth_enabled(self) -> bool:
-        return bool(self.supabase_jwt_secret)
+        # Verification is keyed off the project URL: tokens are checked against
+        # the project's published JWKS (no shared secret needed).
+        return bool(self.supabase_url)
 
     @property
     def cors_origins(self) -> list[str]:

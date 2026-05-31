@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useEventStream } from "../lib/useEventStream";
 import type { Agent, Org, Verdict } from "../lib/types";
 
@@ -17,10 +18,13 @@ export default function Home() {
     "Should this project win Most Sophisticated Harness?");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const { events, done } = useEventStream(sessionId);
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     api.health().then((h) => setHealth(`ok · ${h.repo}`)).catch((e) => setHealth(String(e)));
-    api.listOrgs().then((o) => { setOrgs(o); if (o[0]) setOrgId(o[0].id); });
+    // Seeds the Judge Panel on first login (idempotent), then returns the user's orgs.
+    api.ensureSeed().then((o) => { setOrgs(o); if (o[0]) setOrgId(o[0].id); })
+      .catch((e) => setHealth(String(e)));
   }, []);
   useEffect(() => { if (orgId) api.listAgents(orgId).then(setAgents); }, [orgId]);
 
@@ -45,7 +49,15 @@ export default function Home() {
 
   return (
     <div className="wrap">
-      <h1>Decision Harness</h1>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1>Decision Harness</h1>
+        {user && (
+          <div className="muted small">
+            {user.email} ·{" "}
+            <a href="#" onClick={(e) => { e.preventDefault(); signOut(); }}>sign out</a>
+          </div>
+        )}
+      </div>
       <div className="muted small">backend: {health}</div>
 
       <div className="panel" style={{ margin: "16px 0" }}>
