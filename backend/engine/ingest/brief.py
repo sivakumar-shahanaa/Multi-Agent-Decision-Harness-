@@ -138,10 +138,11 @@ async def _synthesize(project_id: str, repo, deck_text: str, slide_desc: str,
     prompt = (f"PROJECT NAME: {name}\n\nSOURCE MATERIAL:\n{raw[:_MAX_SOURCE_CHARS]}\n\n"
               "Produce the structured brief.")
     try:
-        data = await complete_json(backend, get_settings().inference_model,
-                                   system, prompt, BRIEF_SCHEMA)
+        data = await asyncio.wait_for(
+            complete_json(backend, get_settings().inference_model, system, prompt, BRIEF_SCHEMA),
+            timeout=120)
         return _coerce_brief(data, name)
-    except Exception:
+    except Exception:  # incl. TimeoutError — degrade to the deterministic mock
         return _mock_brief(name, raw)
 
 

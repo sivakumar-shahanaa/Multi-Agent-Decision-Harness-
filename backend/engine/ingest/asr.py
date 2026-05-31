@@ -46,7 +46,9 @@ async def _groq(data: bytes, filename: str, s) -> str:
         flac = await asyncio.to_thread(video.extract_audio, data)
         if flac:
             audio, name = flac, "audio.flac"
-    client = AsyncGroq(api_key=s.groq_api_key)
+    # Bound the call so a stalled Groq socket can't hang the extraction task / freeze
+    # the progress stream; a TimeoutError is caught upstream and degrades to Scribe/mock.
+    client = AsyncGroq(api_key=s.groq_api_key, timeout=120.0, max_retries=1)
     resp = await client.audio.transcriptions.create(
         file=(os.path.basename(name), audio), model=s.groq_model,
         response_format="text", temperature=0.0)

@@ -7,6 +7,7 @@ can force-mock it by monkeypatching resolve_backend, exactly like the council en
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import weave
@@ -33,8 +34,8 @@ async def describe_images(images: list[bytes], instruction: str) -> str:
     messages = [{"role": "user", "content": content}]
     for model in (s.vision_model, s.vision_model_fallback):
         try:
-            resp = await _wandb_client().chat.completions.create(
-                model=model, messages=messages, temperature=0, max_tokens=1500)
+            resp = await asyncio.wait_for(_wandb_client().chat.completions.create(
+                model=model, messages=messages, temperature=0, max_tokens=1500), timeout=120)
             text = (resp.choices[0].message.content or "").strip()
             if text:
                 return text

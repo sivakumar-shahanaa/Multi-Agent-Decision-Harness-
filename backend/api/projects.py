@@ -63,33 +63,42 @@ async def create_project(
     files: list[UploadFile] = File(default=[]),
     user: str = Depends(get_current_user),
 ):
-    if not files and not url.strip():
+    url = url.strip()
+    if not files and not url:
         raise HTTPException(400, "attach at least one PDF/MP4 file or a URL")
-    if url.strip():  # SSRF/defense-in-depth: reject file://, userinfo, internal hosts
+    if url:  # SSRF/defense-in-depth: reject file://, userinfo, internal hosts
         try:
-            validate_url_static(url.strip())
+            validate_url_static(url)
         except UnsafeURLError as e:
             raise HTTPException(400, f"unsafe URL: {e}")
-    repo, storage = get_repo(), get_storage()
-    default_name = (name.strip() or (files[0].filename if files else "")
-                    or url.strip() or "Untitled project")
-    proj = repo.create_project(user, default_name)
-    await asyncio.to_thread(storage.ensure)
 
-    for i, f in enumerate(files):
+    # Validate + read every file UP FRONT, before any persistence — so a rejected
+    # file (415/413) can't orphan a half-created project + uploaded bytes.
+    staged: list[tuple] = []
+    for f in files:
         kind = _kind_for(f)
         if kind is None:
             raise HTTPException(415, f"unsupported file type: {f.filename}")
         data = await _read_capped(f, _MAX_BYTES[kind])
-        path = f"{user}/{proj.id}/{kind.value}-{i}.{_EXT[kind]}"
-        await asyncio.to_thread(storage.put, path, data, f.content_type)
-        repo.add_project_source(
-            proj.id, kind, filename=f.filename or path, content_type=f.content_type,
-            storage_path=path, content_hash=hashlib.sha256(data).hexdigest(), bytes=len(data))
+        staged.append((kind, data, f.filename, f.content_type))
 
-    if url.strip():
-        repo.add_project_source(proj.id, SourceKind.url, filename=url.strip(),
-                                storage_path=url.strip())
+    repo, storage = get_repo(), get_storage()
+    default_name = (name.strip() or (staged[0][2] if staged else "") or url or "Untitled project")
+    # supabase-py is sync — keep blocking repo/storage writes off the event loop.
+    proj = await asyncio.to_thread(repo.create_project, user, default_name)
+    await asyncio.to_thread(storage.ensure)
+
+    for i, (kind, data, filename, content_type) in enumerate(staged):
+        path = f"{user}/{proj.id}/{kind.value}-{i}.{_EXT[kind]}"
+        await asyncio.to_thread(storage.put, path, data, content_type)
+        await asyncio.to_thread(
+            repo.add_project_source, proj.id, kind, filename=filename or path,
+            content_type=content_type, storage_path=path,
+            content_hash=hashlib.sha256(data).hexdigest(), bytes=len(data))
+
+    if url:
+        await asyncio.to_thread(repo.add_project_source, proj.id, SourceKind.url,
+                                filename=url, storage_path=url)
 
     asyncio.create_task(run_extraction(proj.id, repo, storage))
     return CreateProjectResponse(project_id=proj.id)

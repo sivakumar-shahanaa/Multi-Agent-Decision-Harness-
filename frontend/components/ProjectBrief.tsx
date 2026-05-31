@@ -71,7 +71,12 @@ export function ProjectBrief({
       } catch { /* keepalive */ }
     });
     es.addEventListener("done", () => finalize(projectId));
-    es.onerror = () => { /* EventSource auto-reconnects; finalize on terminal events */ };
+    es.onerror = () => {
+      // EventSource auto-reconnects on a transient drop; on a PERMANENT failure
+      // (readyState CLOSED — e.g. 404 from access loss) it won't, and no terminal
+      // event will arrive, so recover by re-fetching the project's real status.
+      if (es.readyState === EventSource.CLOSED) finalize(projectId);
+    };
   }, [finalize]);
 
   async function prepare() {
