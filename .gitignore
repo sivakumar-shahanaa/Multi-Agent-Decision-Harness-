@@ -22,3 +22,6 @@ voice/out/
 # supabase cli local state (keep supabase/migrations/)
 supabase/.temp/
 supabase/.branches/
+
+# Claude Code personal settings
+.claude/settings.local.json
