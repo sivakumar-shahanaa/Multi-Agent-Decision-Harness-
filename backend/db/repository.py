@@ -56,7 +56,7 @@ class InMemoryRepository:
         return org
 
     def list_orgs(self, owner_id: Optional[str]) -> list[Org]:
-        return list(self.orgs.values())
+        return [o for o in self.orgs.values() if o.owner_id == owner_id]
 
     def get_org(self, org_id: str) -> Optional[Org]:
         return self.orgs.get(org_id)
@@ -152,7 +152,7 @@ class SupabaseRepository:
         return Org(**row)
 
     def list_orgs(self, owner_id) -> list[Org]:
-        rows = self._t("orgs").select("*").order("created_at").execute().data
+        rows = self._t("orgs").select("*").eq("owner_id", owner_id).order("created_at").execute().data
         return [Org(**r) for r in rows]
 
     def get_org(self, org_id) -> Optional[Org]:

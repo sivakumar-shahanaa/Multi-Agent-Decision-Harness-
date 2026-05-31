@@ -72,21 +72,39 @@ create table if not exists positions (
   unique (session_id, round, agent_id)
 );
 
--- ─── RLS ───────────────────────────────────────────────────────────────────
--- Hackathon-pragmatic: enable RLS, allow any authenticated user to read/write.
--- Tighten to `owner_id = auth.uid()` post-event. The service-key backend bypasses RLS.
+-- ─── RLS (ownership-scoped) ──────────────────────────────────────────────────
+-- The service-key backend bypasses RLS; these protect any DIRECT client access
+-- (frontend anon key + user JWT). A user may only touch rows in orgs they own.
 alter table orgs      enable row level security;
 alter table agents    enable row level security;
 alter table sessions  enable row level security;
 alter table events    enable row level security;
 alter table positions enable row level security;
 
-do $$
-declare t text;
-begin
-  foreach t in array array['orgs','agents','sessions','events','positions'] loop
-    execute format('drop policy if exists authed_all on %I;', t);
-    execute format(
-      'create policy authed_all on %I for all to authenticated using (true) with check (true);', t);
-  end loop;
-end $$;
+drop policy if exists org_owner on orgs;
+create policy org_owner on orgs for all to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists agents_owner on agents;
+create policy agents_owner on agents for all to authenticated
+  using (exists (select 1 from orgs o where o.id = agents.org_id and o.owner_id = auth.uid()))
+  with check (exists (select 1 from orgs o where o.id = agents.org_id and o.owner_id = auth.uid()));
+
+drop policy if exists sessions_owner on sessions;
+create policy sessions_owner on sessions for all to authenticated
+  using (exists (select 1 from orgs o where o.id = sessions.org_id and o.owner_id = auth.uid()))
+  with check (exists (select 1 from orgs o where o.id = sessions.org_id and o.owner_id = auth.uid()));
+
+drop policy if exists events_owner on events;
+create policy events_owner on events for all to authenticated
+  using (exists (select 1 from sessions s join orgs o on o.id = s.org_id
+                 where s.id = events.session_id and o.owner_id = auth.uid()))
+  with check (exists (select 1 from sessions s join orgs o on o.id = s.org_id
+                      where s.id = events.session_id and o.owner_id = auth.uid()));
+
+drop policy if exists positions_owner on positions;
+create policy positions_owner on positions for all to authenticated
+  using (exists (select 1 from sessions s join orgs o on o.id = s.org_id
+                 where s.id = positions.session_id and o.owner_id = auth.uid()))
+  with check (exists (select 1 from sessions s join orgs o on o.id = s.org_id
+                      where s.id = positions.session_id and o.owner_id = auth.uid()));

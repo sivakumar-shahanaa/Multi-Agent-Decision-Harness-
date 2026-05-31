@@ -16,7 +16,7 @@ from ..schemas import (
     SessionDetail,
     SessionStatus,
 )
-from .deps import get_current_user
+from .deps import get_current_user, require_org_access, require_session_access
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -37,8 +37,7 @@ async def _run_debate(session_id: str) -> None:
 @router.post("", response_model=CreateSessionResponse)
 async def create_session(body: CreateSessionRequest, user: str = Depends(get_current_user)):
     repo = get_repo()
-    if not repo.get_org(body.org_id):
-        raise HTTPException(404, "org not found")
+    require_org_access(repo, body.org_id, user)
     if not repo.list_agents(body.org_id):
         raise HTTPException(400, "org has no agents")
     sess = repo.create_session(body.org_id, body.question, body.context, body.rounds,
@@ -50,9 +49,7 @@ async def create_session(body: CreateSessionRequest, user: str = Depends(get_cur
 @router.get("/{session_id}", response_model=SessionDetail)
 def get_session(session_id: str, user: str = Depends(get_current_user)):
     repo = get_repo()
-    sess = repo.get_session(session_id)
-    if not sess:
-        raise HTTPException(404, "session not found")
+    sess = require_session_access(repo, session_id, user)
     return SessionDetail(session=sess, events=repo.list_events(session_id),
                          positions=repo.list_positions(session_id),
                          verdict=sess.final_verdict)
@@ -62,8 +59,7 @@ def get_session(session_id: str, user: str = Depends(get_current_user)):
 async def stream_session(session_id: str, request: Request,
                          user: str = Depends(get_current_user)):
     repo = get_repo()
-    if not repo.get_session(session_id):
-        raise HTTPException(404, "session not found")
+    require_session_access(repo, session_id, user)
     q = stream.subscribe(session_id)
 
     async def gen():
@@ -91,9 +87,7 @@ async def stream_session(session_id: str, request: Request,
 @router.post("/{session_id}/rerun", response_model=CreateSessionResponse)
 async def rerun(session_id: str, body: RerunRequest, user: str = Depends(get_current_user)):
     repo = get_repo()
-    parent = repo.get_session(session_id)
-    if not parent:
-        raise HTTPException(404, "session not found")
+    parent = require_session_access(repo, session_id, user)
     child = repo.create_session(parent.org_id, parent.question,
                                 context=body.context or parent.context, rounds=parent.rounds,
                                 created_by=user, parent_session=parent.id,
@@ -105,9 +99,7 @@ async def rerun(session_id: str, body: RerunRequest, user: str = Depends(get_cur
 @router.get("/{session_id}/influence", response_model=InfluenceGraph)
 def influence(session_id: str, user: str = Depends(get_current_user)):
     repo = get_repo()
-    sess = repo.get_session(session_id)
-    if not sess:
-        raise HTTPException(404, "session not found")
+    sess = require_session_access(repo, session_id, user)
     agents = repo.list_agents(sess.org_id)
     weights = sess.weights_override or {a.id: a.weight for a in agents}
     return build_influence_graph(agents, repo.list_events(session_id), weights)

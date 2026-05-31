@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # --- CORS ---
     frontend_origin: str = "http://localhost:3000"
 
+    # --- Auth posture ---
+    # Local dev only: allow requests with no Authorization header (treated as the
+    # demo user). IGNORED once auth_enabled (a JWT secret is set) — then a valid
+    # token is always required. Set False in any shared/hosted environment.
+    dev_unauthenticated: bool = True
+
     @property
     def project_path(self) -> str:
         return f"{self.wandb_entity}/{self.wandb_project}" if self.wandb_entity else self.wandb_project

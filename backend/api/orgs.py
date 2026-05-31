@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..db.repository import get_repo
 from ..schemas import Agent, AgentCreate, CreateOrgRequest, GenerateOrgRequest, Org
-from .deps import get_current_user
+from .deps import get_current_user, require_org_access
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 
@@ -26,11 +26,13 @@ def generate_org(body: GenerateOrgRequest, user: str = Depends(get_current_user)
 
 @router.get("/{org_id}/agents", response_model=list[Agent])
 def list_org_agents(org_id: str, user: str = Depends(get_current_user)):
-    return get_repo().list_agents(org_id)
+    repo = get_repo()
+    require_org_access(repo, org_id, user)
+    return repo.list_agents(org_id)
 
 
 @router.post("/{org_id}/agents", response_model=Agent)
 def create_org_agent(org_id: str, body: AgentCreate, user: str = Depends(get_current_user)):
-    if not get_repo().get_org(org_id):
-        raise HTTPException(404, "org not found")
-    return get_repo().create_agent(org_id, body)
+    repo = get_repo()
+    require_org_access(repo, org_id, user)
+    return repo.create_agent(org_id, body)
