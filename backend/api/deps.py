@@ -1,21 +1,42 @@
 """Request dependencies: authenticated user + resource-ownership guards.
 
 Auth posture (default-deny once configured):
-  • A presented Bearer token is ALWAYS cryptographically verified. We never decode
-    a token we can't verify — if no JWT secret is set, a presented token is rejected.
+  • A presented Bearer token is ALWAYS cryptographically verified against the
+    Supabase project's published JWKS (asymmetric ES256/RS256 signing keys). We
+    never decode a token we can't verify — if Supabase isn't configured, a
+    presented token is rejected.
   • A missing token is accepted as the demo user ONLY in local dev
-    (`dev_unauthenticated` True AND auth not configured). The moment a JWT secret is
-    set (`auth_enabled`), a valid token is required.
+    (`dev_unauthenticated` True AND auth not configured). The moment Supabase is
+    configured (`auth_enabled`), a valid token is required.
 
 Ownership guards return 404 (not 403) so we don't leak the existence of resources.
 """
+from functools import lru_cache
 from typing import Optional
 
+import jwt  # PyJWT
 from fastapi import Header, HTTPException
+from jwt import PyJWKClient
 
 from ..config import get_settings
 
 DEMO_USER_ID = "00000000-0000-0000-0000-000000000000"
+
+# Supabase signs user access tokens with asymmetric keys published via JWKS.
+_ALGORITHMS = ["ES256", "RS256"]
+
+
+@lru_cache(maxsize=8)
+def _jwk_client(jwks_url: str) -> PyJWKClient:
+    # PyJWKClient caches fetched signing keys internally (default ~5-min lifespan),
+    # so reusing one instance per URL avoids refetching the JWKS on every request.
+    return PyJWKClient(jwks_url)
+
+
+def _verify_token(token: str, jwks_url: str) -> dict:
+    signing_key = _jwk_client(jwks_url).get_signing_key_from_jwt(token)
+    return jwt.decode(token, signing_key.key, algorithms=_ALGORITHMS,
+                      audience="authenticated")
 
 
 def get_current_user(authorization: Optional[str] = Header(default=None)) -> str:
@@ -24,13 +45,10 @@ def get_current_user(authorization: Optional[str] = Header(default=None)) -> str
     if authorization:
         token = authorization.removeprefix("Bearer ").strip()
         if not s.auth_enabled:
-            # We have no secret to verify with — refuse rather than trust blindly.
+            # No project to verify against — refuse rather than trust blindly.
             raise HTTPException(status_code=401, detail="token verification not configured")
         try:
-            import jwt  # PyJWT
-
-            claims = jwt.decode(token, s.supabase_jwt_secret, algorithms=["HS256"],
-                                audience="authenticated")
+            claims = _verify_token(token, s.jwks_url)
         except Exception as exc:
             raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
         sub = claims.get("sub")
