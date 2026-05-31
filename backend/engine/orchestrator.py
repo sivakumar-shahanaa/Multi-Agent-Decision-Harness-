@@ -1,7 +1,9 @@
 """Orchestrator: weighted verdict + influence graph (ROADMAP §7.4, §8).
 
-Numbers are REAL (scoring.py). The narrative summary is a MOCK for Hour 0 —
-WS-A replaces `_summarize` with an ORCHESTRATOR_PROMPT LLM call over the transcript.
+Numbers are REAL (scoring.py) and conflicts/dissent are computed structurally from
+the final positions (reliable). The natural-language `summary` + `key_agreements`
+come from an LLM over the transcript when a backend is configured, else a terse
+deterministic fallback.
 """
 from __future__ import annotations
 
@@ -22,14 +24,15 @@ from ..schemas import (
     Position,
     Verdict,
 )
+from .llm import complete_json, resolve_backend
+from .prompts import ORCHESTRATOR_PROMPT, SUMMARY_SCHEMA
 from .scoring import blended_confidence, decision_from_score, weighted_score
+
+_DEFAULT_MODEL = "claude-sonnet-4-6"  # resolve_backend may downgrade to W&B Inference
 
 
 def _influence(agents: list[Agent], events: list[Event]):
-    """Returns (ranking: list[InfluenceScore], edges: list[(from,to,weight)]).
-
-    Hour 0: weight = count of influence mentions. TODO(WS-A): weight by |Δscore|.
-    """
+    """(ranking, edges). Hour-1 weight = count of influence mentions; TODO weight by |Δscore|."""
     out: Counter = Counter()
     edges: dict[tuple[str, str], float] = defaultdict(float)
     for ev in events:
@@ -44,25 +47,50 @@ def _influence(agents: list[Agent], events: list[Event]):
     return ranking, edges
 
 
-def _summarize(positions: dict[str, Position], agents: list[Agent]) -> dict:
+def _structural(positions: dict[str, Position], agents: list[Agent]):
     by_id = {a.id: a for a in agents}
-    stances = [p.stance for p in positions.values()]
-    majority = Counter(s.value for s in stances).most_common(1)[0][0]
+    majority = Counter(p.stance.value for p in positions.values()).most_common(1)[0][0]
     dissent = [Dissent(agent_id=aid, stance=p.stance,
-                       why=f"[mock] {by_id[aid].role} stayed {p.stance.value}")
+                       why=f"{by_id[aid].role} held {p.stance.value} at {p.score}/10")
                for aid, p in positions.items() if p.stance.value != majority]
-    # widest score gap = headline conflict
     ordered = sorted(positions.items(), key=lambda kv: kv[1].score)
-    conflicts = []
+    conflicts: list[Conflict] = []
     if len(ordered) >= 2 and ordered[-1][1].score - ordered[0][1].score >= 2:
-        conflicts = [Conflict(between=[ordered[0][0], ordered[-1][0]],
-                              issue="[mock] largest score gap on the panel")]
-    return {
-        "summary": f"[mock] Panel leans {majority}. Replace with ORCHESTRATOR_PROMPT output.",
-        "key_agreements": ["[mock] agreement point"],
-        "key_conflicts": conflicts,
-        "dissenting_opinions": dissent,
-    }
+        lo, hi = ordered[0], ordered[-1]
+        conflicts = [Conflict(between=[lo[0], hi[0]],
+                              issue=f"widest gap: {hi[1].score} vs {lo[1].score} / 10")]
+    return majority, conflicts, dissent
+
+
+def _transcript(events: list[Event], agents: list[Agent]) -> str:
+    by_id = {a.id: a.name for a in agents}
+    lines = []
+    for e in events:
+        who = by_id.get(e.agent_id, "Orchestrator")
+        if e.type == EventType.message:
+            lines.append(f"{who}: {e.content.get('text', '')}")
+        elif e.type in (EventType.position, EventType.position_update):
+            lines.append(f"{who} [{e.content.get('stance')} {e.content.get('score')}/10]: "
+                         f"{e.content.get('rationale', '')}")
+    return "\n".join(lines)[:6000]
+
+
+async def _summarize(transcript: str, positions: dict[str, Position],
+                     agents: list[Agent]) -> dict:
+    majority, conflicts, dissent = _structural(positions, agents)
+    summary = f"Panel leans {majority} on the weighted vote."
+    agreements: list[str] = []
+    backend = resolve_backend("anthropic")
+    if backend:
+        try:
+            d = await complete_json(backend, _DEFAULT_MODEL, ORCHESTRATOR_PROMPT,
+                                    transcript, SUMMARY_SCHEMA)
+            summary = str(d.get("summary") or summary)
+            agreements = [str(x) for x in (d.get("key_agreements") or [])]
+        except Exception:
+            pass
+    return {"summary": summary, "key_agreements": agreements,
+            "key_conflicts": conflicts, "dissenting_opinions": dissent}
 
 
 @weave.op()
@@ -71,7 +99,7 @@ async def orchestrate_verdict(agents: list[Agent], final_positions: dict[str, Po
     scores = {aid: p.score for aid, p in final_positions.items()}
     weighted = round(weighted_score(scores, weights), 2)
     ranking, _ = _influence(agents, events)
-    summary = _summarize(final_positions, agents)
+    summary = await _summarize(_transcript(events, agents), final_positions, agents)
     return Verdict(
         decision=decision_from_score(weighted),
         weighted_score=weighted,

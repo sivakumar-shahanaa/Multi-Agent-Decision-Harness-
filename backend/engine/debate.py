@@ -12,6 +12,7 @@ from . import stream
 from .agent_runner import agent_position, agent_turn
 from .orchestrator import orchestrate_verdict
 from .scoring import normalized_variance
+from .tools import execute_tool
 
 CONVERGE_THRESHOLD = 0.15  # normalized score variance below which we stop early
 
@@ -65,8 +66,10 @@ async def run_debate(session: Session, agents: list[Agent], repo,
                 emit(rnd, EventType.peer_request, t.peer_request, agent_id=a.id)
             if t.tool_call:
                 tc = emit(rnd, EventType.tool_call, t.tool_call, agent_id=a.id)
+                result = await execute_tool(t.tool_call.get("tool", ""),
+                                            t.tool_call.get("args", {}))
                 emit(rnd, EventType.tool_result,
-                     {"tool": t.tool_call["tool"], "result": "[mock] tool output"},
+                     {"tool": t.tool_call.get("tool"), "result": result},
                      agent_id=a.id, parent=tc.id)
             emit(rnd, EventType.position_update, t.position.model_dump(),
                  agent_id=a.id, influenced=t.influenced_by)

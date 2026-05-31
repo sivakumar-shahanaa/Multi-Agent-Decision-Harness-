@@ -1,9 +1,12 @@
 """One agent's turn (ROADMAP §7.3).
 
-HOUR 0 = deterministic MOCK so the whole pipeline runs end-to-end with no API
-keys. WS-A replaces the mock bodies with real Claude Agent SDK / W&B Inference
-calls returning AGENT_TURN_SCHEMA — the function signatures and return shapes
-stay identical, so nothing downstream changes.
+Real path: each agent is driven by an LLM (provider-routed in llm.py) and returns
+structured JSON. If no model credentials are configured — or a call fails — we fall
+back to a deterministic MOCK so the pipeline always completes (keyless dev/demo).
+
+WS-A next steps: attach MCP tools per agent (the tool_call flow is already wired in
+tools.py + debate.py) and, for `provider=anthropic`, swap the plain Messages call in
+llm.py for the full Claude Agent SDK so subagents get native MCP tool loops.
 """
 from __future__ import annotations
 
@@ -13,12 +16,10 @@ from typing import Optional
 
 import weave
 
-from ..schemas import Agent, Position, Provider, Stance
+from ..schemas import Agent, Position, Stance
+from .llm import complete_json, resolve_backend
+from .prompts import AGENT_TURN_SCHEMA, DEBATE_RUBRIC, POSITION_SCHEMA
 from .scoring import decision_from_score
-
-
-def _seed(*parts: str) -> int:
-    return int(hashlib.sha256("|".join(parts).encode()).hexdigest()[:12], 16)
 
 
 @dataclass
@@ -26,63 +27,97 @@ class TurnResult:
     message: str
     position: Position
     influenced_by: list[str] = field(default_factory=list)
-    peer_request: Optional[dict] = None      # {"to_agent_id","question"}
-    tool_call: Optional[dict] = None          # {"tool","args"}
+    peer_request: Optional[dict] = None
+    tool_call: Optional[dict] = None
 
 
-# ───────────────────────────── round 0 ─────────────────────────────
-@weave.op()
-async def agent_position(agent: Agent, question: str, context: Optional[str]) -> Position:
-    """Initial independent position. MOCK → replace with a single SDK call."""
-    r = _seed(agent.name, question)
-    score = round(4.0 + (r % 60) / 10.0, 1)          # 4.0 .. 9.9
+def _seed(*parts: str) -> int:
+    return int(hashlib.sha256("|".join(parts).encode()).hexdigest()[:12], 16)
+
+
+def _coerce_position(data: dict) -> Position:
     return Position(
-        stance=decision_from_score(score),
-        score=score,
-        confidence=round(0.5 + (r % 40) / 100.0, 2),  # 0.50 .. 0.89
-        rationale=f"[mock] {agent.role}: initial read before hearing the others.",
+        stance=Stance(str(data["stance"]).upper()),
+        score=max(0.0, min(10.0, float(data["score"]))),
+        confidence=max(0.0, min(1.0, float(data["confidence"]))),
+        rationale=str(data.get("rationale", "")),
     )
 
 
-# ───────────────────────────── rounds 1..N ─────────────────────────────
+# ───────────────────────── round 0 ─────────────────────────
+@weave.op()
+async def agent_position(agent: Agent, question: str, context: Optional[str]) -> Position:
+    backend = resolve_backend(agent.provider)
+    if backend is None:
+        return _mock_position(agent, question)
+    system = agent.system_prompt + (
+        "\n\nYou are forming your INITIAL position on the decision below, before "
+        "hearing the other panelists. Stay fully in character.")
+    prompt = (f"DECISION QUESTION:\n{question}\n\n"
+              f"CONTEXT:\n{context or '(none provided)'}\n\nGive your initial position.")
+    try:
+        data = await complete_json(backend, agent.model, system, prompt, POSITION_SCHEMA)
+        return _coerce_position(data)
+    except Exception:
+        return _mock_position(agent, question)
+
+
+# ───────────────────────── rounds 1..N ─────────────────────────
 @weave.op()
 async def agent_turn(agent: Agent, prev: Position, board: str,
                      peers: list[Agent], rnd: int) -> TurnResult:
-    """One deliberation turn. MOCK → replace with an SDK call using DEBATE_RUBRIC
-    + AGENT_TURN_SCHEMA, with peers' positions in `board` and MCP tools attached."""
+    backend = resolve_backend(agent.provider)
+    if backend is None:
+        return _mock_turn(agent, prev, peers, rnd)
+
+    peer_ids = {p.id for p in peers if p.id != agent.id}
+    peer_list = "\n".join(f"- {p.name} (id={p.id}): {p.role}"
+                          for p in peers if p.id != agent.id)
+    prompt = (
+        f"{DEBATE_RUBRIC}\n\n"
+        f"THE PANEL SO FAR (round {rnd}):\n{board}\n\n"
+        f"PEERS YOU MAY ADDRESS (use their id in peer_request.to_agent_id):\n{peer_list}\n\n"
+        f"YOUR PREVIOUS POSITION: {prev.stance.value} {prev.score}/10 "
+        f"(confidence {prev.confidence}).\n\nTake your deliberation turn now."
+    )
+    try:
+        d = await complete_json(backend, agent.model, agent.system_prompt, prompt, AGENT_TURN_SCHEMA)
+        influenced = [i for i in (d.get("influenced_by") or []) if i in peer_ids]
+        pr = d.get("peer_request") or None
+        if pr and pr.get("to_agent_id") not in peer_ids:
+            pr = None
+        tc = d.get("tool_call") or None
+        if tc and not tc.get("tool"):
+            tc = None
+        return TurnResult(message=str(d.get("message", "")),
+                          position=_coerce_position(d["position"]),
+                          influenced_by=influenced, peer_request=pr, tool_call=tc)
+    except Exception:
+        return _mock_turn(agent, prev, peers, rnd)
+
+
+# ───────────────────────── deterministic mock fallback ─────────────────────────
+def _mock_position(agent: Agent, question: str) -> Position:
+    r = _seed(agent.name, question)
+    score = round(4.0 + (r % 60) / 10.0, 1)
+    return Position(stance=decision_from_score(score), score=score,
+                    confidence=round(0.5 + (r % 40) / 100.0, 2),
+                    rationale=f"[mock] {agent.role}: initial read (no model configured).")
+
+
+def _mock_turn(agent: Agent, prev: Position, peers: list[Agent], rnd: int) -> TurnResult:
     r = _seed(agent.name, str(rnd))
-    # Mock "deliberation": nudge score toward the room (consensus pull), note an influencer.
     pull = (6.5 - prev.score) * 0.25
     new_score = max(0.0, min(10.0, round(prev.score + pull, 1)))
     influenced = []
     if peers and abs(pull) > 0.4:
-        influencer = peers[r % len(peers)]
-        if influencer.id != agent.id:
-            influenced = [influencer.id]
+        cand = peers[r % len(peers)]
+        if cand.id != agent.id:
+            influenced = [cand.id]
     return TurnResult(
         message=f"[mock] {agent.name}: after round {rnd} I "
                 f"{'hold' if abs(pull) < 0.4 else 'adjust'} my position.",
-        position=Position(
-            stance=decision_from_score(new_score),
-            score=new_score,
-            confidence=min(1.0, round(prev.confidence + 0.05, 2)),
-            rationale=f"[mock] {agent.role}: updated after the debate.",
-        ),
-        influenced_by=influenced,
-    )
-
-
-# ─────────────── real-call skeletons (WS-A wires these in H1-H2) ───────────────
-async def _call_anthropic(agent: Agent, system: str, prompt: str, schema: dict) -> dict:
-    """TODO(WS-A): Claude Agent SDK — subagent with `agent.system_prompt` + MCP tools.
-    from claude_agent_sdk import query  # see code.claude.com/docs/en/agent-sdk
-    Return parsed JSON matching AGENT_TURN_SCHEMA.
-    """
-    raise NotImplementedError
-
-
-async def _call_wandb_inference(agent: Agent, system: str, prompt: str, schema: dict) -> dict:
-    """TODO(WS-A): OpenAI-compatible call to W&B Inference for `provider=wandb` agents.
-    Reuse the client pattern from the repo-root main.py (base_url + project header).
-    """
-    raise NotImplementedError
+        position=Position(stance=decision_from_score(new_score), score=new_score,
+                          confidence=min(1.0, round(prev.confidence + 0.05, 2)),
+                          rationale=f"[mock] {agent.role}: updated after the debate."),
+        influenced_by=influenced)

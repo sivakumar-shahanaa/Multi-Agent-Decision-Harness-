@@ -31,6 +31,28 @@ Do NOT compute the numeric score yourself — that is calculated from weighted v
 Be neutral and precise; surface conflict rather than smoothing it over.
 """.strip()
 
+# Initial (round 0) position.
+POSITION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stance": {"enum": ["YES", "NO", "CONDITIONAL"]},
+        "score": {"type": "number", "minimum": 0, "maximum": 10},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "rationale": {"type": "string"},
+    },
+    "required": ["stance", "score", "confidence", "rationale"],
+}
+
+# Orchestrator's natural-language summary (numbers are computed, not asked for).
+SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "key_agreements": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["summary", "key_agreements"],
+}
+
 # Structured output each agent must return per deliberation turn.
 AGENT_TURN_SCHEMA = {
     "type": "object",
