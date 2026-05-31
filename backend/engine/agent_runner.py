@@ -188,6 +188,21 @@ async def agent_turn(agent: Agent, prev: Position, board: str, peers: list[Agent
             ledger.append({"tool": tc["tool"], "args": tc["args"], "result": result})
             calls += 1
             continue
+        # LLM requested a tool call but used an unregistered name — surface the error
+        # in the evidence ledger so it can self-correct on the next iteration.
+        tc_raw = d.get("tool_call") if isinstance(d.get("tool_call"), dict) else None
+        if tc_raw and tc_raw.get("tool") and calls < k:
+            bad_tool = str(tc_raw["tool"])
+            available = sorted(reg.effective_tool_names(agent))
+            result = {"error": f"Unknown tool '{bad_tool}'. Available tools: {available}"}
+            payload = {"tool": bad_tool, "args": tc_raw.get("args") or {}}
+            if emit:
+                ev = emit(rnd, EventType.tool_call, payload, agent_id=agent.id)
+                emit(rnd, EventType.tool_result, {"tool": bad_tool, "result": result},
+                     agent_id=agent.id, parent=getattr(ev, "id", None))
+            ledger.append({"tool": bad_tool, "args": tc_raw.get("args") or {}, "result": result})
+            calls += 1
+            continue
         try:
             return _coerce_turn(d, agent, peers)
         except Exception:
