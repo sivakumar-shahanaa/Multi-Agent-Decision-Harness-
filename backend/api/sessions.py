@@ -21,7 +21,7 @@ from ..schemas import (
     SessionStatus,
 )
 from .deps import (get_current_user, get_current_user_sse, require_org_access,
-                   require_session_access)
+                   require_project_access, require_session_access)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -45,8 +45,17 @@ async def create_session(body: CreateSessionRequest, user: str = Depends(get_cur
     require_org_access(repo, body.org_id, user)
     if not repo.list_agents(body.org_id):
         raise HTTPException(400, "org has no agents")
-    sess = repo.create_session(body.org_id, body.question, body.context, body.rounds,
+    context = body.context
+    if body.project_id:
+        # Ground the debate in a finished Project Brief; merge any freeform context.
+        proj = require_project_access(repo, body.project_id, user)
+        brief_text = proj.brief_text or ""
+        extra = (context or "").strip()
+        context = f"{brief_text}\n\nADDITIONAL CONTEXT:\n{extra}" if brief_text and extra else (brief_text or extra or None)
+    sess = repo.create_session(body.org_id, body.question, context, body.rounds,
                                created_by=user)
+    if body.project_id:
+        repo.update_session(sess.id, project_id=body.project_id)
     asyncio.create_task(_run_debate(sess.id))
     return CreateSessionResponse(session_id=sess.id)
 

@@ -93,3 +93,11 @@ def require_session_access(repo, session_id: str, user: str):
     if not org or org.owner_id != user:
         raise HTTPException(status_code=404, detail="session not found")
     return sess
+
+
+def require_project_access(repo, project_id: str, user: str):
+    """Return the project iff `user` owns it, else 404 (don't leak existence)."""
+    proj = repo.get_project(project_id)
+    if not proj or proj.owner_id != user:
+        raise HTTPException(status_code=404, detail="project not found")
+    return proj

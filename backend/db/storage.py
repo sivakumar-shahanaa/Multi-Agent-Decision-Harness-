@@ -64,13 +64,17 @@ class SupabaseStorage:
     def __init__(self, client, bucket: str) -> None:
         self.c = client
         self.bucket = bucket
+        self._ensured = False
 
     def ensure(self) -> None:
+        if self._ensured:
+            return
         try:
             names = {b.name for b in self.c.storage.list_buckets()}
         except Exception:
             names = set()
         if self.bucket in names:
+            self._ensured = True
             return
         try:
             self.c.storage.create_bucket(self.bucket, options={
@@ -82,6 +86,7 @@ class SupabaseStorage:
             # Created concurrently / already exists / insufficient perms — uploads
             # will surface a clearer error if the bucket truly isn't there.
             pass
+        self._ensured = True
 
     def put(self, path: str, data: bytes, content_type: Optional[str] = None) -> str:
         opts = {"upsert": "true"}
