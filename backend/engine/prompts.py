@@ -8,17 +8,57 @@ DEBATE_RUBRIC = """
 You are one member of a decision-making panel. You have already stated an initial
 position. You can now SEE what every other member said. Do exactly one deliberation turn:
 
-1. Make ONE public argument (`message`) — concise, in your own voice, addressing the
-   strongest opposing point.
-2. Optionally ask ONE peer a direct question (`peer_request`) by their agent_id.
-3. Optionally call a tool you have access to, to ground a claim.
-4. Re-state your position (`position`): stance (YES/NO/CONDITIONAL), score 0-10,
+1. Optionally jot ONE line of private reasoning (`thought`) — not shown to peers.
+2. If a claim needs grounding, CALL A TOOL from your allowlist (`tool_call`: {tool, args}).
+   Prefer real evidence over assertion — you will see the result and may then revise.
+3. Make ONE public argument (`message`) — concise, in your own voice, addressing the
+   strongest opposing point. Cite tool evidence when you have it.
+4. Optionally ask ONE peer a direct question (`peer_request`) by their agent_id.
+5. Re-state your position (`position`): stance (YES/NO/CONDITIONAL), score 0-10,
    confidence 0-1, and a one-line rationale.
-5. If a peer's argument changed your score, list their agent_ids in `influenced_by`.
-   Be honest — a static panel is a useless panel.
+6. If a peer's argument OR tool evidence changed your score, list the agent_ids in
+   `influenced_by`. Be honest — a static panel is a useless panel.
 
 Stay in character. Do not invent facts; use tools or say you're uncertain.
 """.strip()
+
+# Shown after a tool returns, asking the agent to finalize (or call once more).
+REACT_FOLLOWUP = """
+You called a tool and the result is in your EVIDENCE LEDGER above. Finalize your turn now:
+if the evidence changed your read, MOVE your score and cite the evidence in `rationale`.
+You may call at most {remaining} more tool(s); otherwise set tool_call to null.
+""".strip()
+
+# A peer was asked a direct question and gives a SHORT spoken answer.
+PEER_ANSWER_PROMPT = """
+You are {name}, on a decision panel. {asker} asked you directly:
+"{question}"
+Answer in 1-2 sentences, in your own voice and from your expertise. Be specific and
+direct — concede a fair point or hold your ground, but actually answer the question.
+Return JSON: {{"answer": "..."}}.
+""".strip()
+
+PEER_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+}
+
+# The orchestrator moderates between rounds: who moved, where the live conflict is,
+# and a directive for the next round.
+MODERATOR_PROMPT = """
+You are the orchestrator moderating a live decision panel between rounds. Given who
+moved and the current split, write a SHORT moderator note (1-2 sentences) naming the
+real tension and DIRECTING the next round — e.g. ask the two most-split members to
+resolve a specific disagreement. Be neutral, surface conflict, don't smooth it over.
+Return JSON: {"note": "...", "directive": "..."}.
+""".strip()
+
+MODERATOR_SCHEMA = {
+    "type": "object",
+    "properties": {"note": {"type": "string"}, "directive": {"type": "string"}},
+    "required": ["note"],
+}
 
 ORCHESTRATOR_PROMPT = """
 You are the orchestrator of a decision panel. You are given the full transcript of a
@@ -88,6 +128,7 @@ SUMMARY_SCHEMA = {
 AGENT_TURN_SCHEMA = {
     "type": "object",
     "properties": {
+        "thought": {"type": ["string", "null"]},   # private reasoning (optional)
         "message": {"type": "string"},
         "peer_request": {
             "type": ["object", "null"],

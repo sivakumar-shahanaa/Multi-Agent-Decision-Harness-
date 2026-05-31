@@ -80,14 +80,47 @@ create table if not exists positions (
   unique (session_id, round, agent_id)
 );
 
+-- ─── Project briefs (multimodal context: deck + demo video + URL → one brief) ───
+create table if not exists projects (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid,                        -- app-level (JWT sub); not a FK (see orgs.owner_id)
+  name        text not null,
+  status      text not null default 'pending',  -- pending|extracting|ready|failed
+  brief       jsonb,                       -- structured Brief
+  brief_text  text,                        -- markdown rendering → becomes session.context
+  error       text,
+  created_at  timestamptz default now()
+);
+
+create table if not exists project_sources (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null references projects(id) on delete cascade,
+  kind          text not null,             -- 'pdf' | 'video' | 'url'
+  filename      text,                      -- original name, or the URL for kind=url
+  content_type  text,
+  storage_path  text,                      -- object key in the bucket / local path / url
+  content_hash  text,                      -- sha256 — dedupe / re-extraction cache
+  bytes         int default 0,
+  extracted     jsonb,                     -- per-source intermediate (inspectable)
+  created_at    timestamptz default now()
+);
+create index if not exists project_sources_project_idx on project_sources(project_id);
+
+-- A session may be grounded in a finished Project Brief (added idempotently so it
+-- applies to DBs created before this column existed).
+alter table sessions add column if not exists project_id uuid
+  references projects(id) on delete set null;
+
 -- ─── RLS (ownership-scoped) ──────────────────────────────────────────────────
 -- The service-key backend bypasses RLS; these protect any DIRECT client access
 -- (frontend anon key + user JWT). A user may only touch rows in orgs they own.
-alter table orgs      enable row level security;
-alter table agents    enable row level security;
-alter table sessions  enable row level security;
-alter table events    enable row level security;
-alter table positions enable row level security;
+alter table orgs            enable row level security;
+alter table agents          enable row level security;
+alter table sessions        enable row level security;
+alter table events          enable row level security;
+alter table positions       enable row level security;
+alter table projects        enable row level security;
+alter table project_sources enable row level security;
 
 drop policy if exists org_owner on orgs;
 create policy org_owner on orgs for all to authenticated
@@ -117,6 +150,17 @@ create policy positions_owner on positions for all to authenticated
   with check (exists (select 1 from sessions s join orgs o on o.id = s.org_id
                       where s.id = positions.session_id and o.owner_id = auth.uid()));
 
+drop policy if exists projects_owner on projects;
+create policy projects_owner on projects for all to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists project_sources_owner on project_sources;
+create policy project_sources_owner on project_sources for all to authenticated
+  using (exists (select 1 from projects p
+                 where p.id = project_sources.project_id and p.owner_id = auth.uid()))
+  with check (exists (select 1 from projects p
+                      where p.id = project_sources.project_id and p.owner_id = auth.uid()));
+
 -- ─── self-heal FK delete rules on existing DBs (create-if-not-exists skips column defs) ───
 alter table events drop constraint if exists events_agent_id_fkey;
 alter table events add constraint events_agent_id_fkey
@@ -127,3 +171,9 @@ alter table events add constraint events_parent_event_fkey
 alter table sessions drop constraint if exists sessions_parent_session_fkey;
 alter table sessions add constraint sessions_parent_session_fkey
   foreign key (parent_session) references sessions(id) on delete set null;
+alter table sessions drop constraint if exists sessions_project_id_fkey;
+alter table sessions add constraint sessions_project_id_fkey
+  foreign key (project_id) references projects(id) on delete set null;
+alter table project_sources drop constraint if exists project_sources_project_id_fkey;
+alter table project_sources add constraint project_sources_project_id_fkey
+  foreign key (project_id) references projects(id) on delete cascade;

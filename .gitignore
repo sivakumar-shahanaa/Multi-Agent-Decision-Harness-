@@ -18,6 +18,7 @@ frontend/.env.local
 
 # misc
 voice/out/
+.uploads/
 
 # supabase cli local state (keep supabase/migrations/)
 supabase/.temp/
@@ -26,3 +27,4 @@ supabase/.branches/
 # Claude Code personal settings
 .claude/settings.local.json
 .playwright-mcp
+.vercel

@@ -48,7 +48,7 @@ export function Console({
         <Seal />
         <div>
           <div className="eyebrow" style={{ marginBottom: 2 }}>The Deliberation Room</div>
-          <h1 style={{ fontSize: 28, lineHeight: 1 }}>Decision&nbsp;Harness</h1>
+          <h1 style={{ fontSize: 28, lineHeight: 1 }}>Decisive&nbsp;AI</h1>
         </div>
       </div>
 

@@ -53,7 +53,7 @@ export function Composer({
           <button className="btn btn-ghost btn-sm" onClick={onOpenBuilder}>⊕ Assemble a council</button>
         </div>
 
-        <div className="row wrapflex" style={{ gap: 12, alignItems: "stretch" }}>
+        <div className="row wrapflex" style={{ gap: 12, alignItems: "flex-end" }}>
           <div className="col" style={{ gap: 5, minWidth: 200 }}>
             <label className="eyebrow" style={{ fontSize: 9.5 }}>Council</label>
             <select value={orgId} onChange={(e) => onOrg(e.target.value)} disabled={!orgs.length}>
@@ -80,8 +80,7 @@ export function Composer({
             />
           </div>
 
-          <div className="col" style={{ gap: 5, justifyContent: "flex-end" }}>
-            <label className="eyebrow" style={{ fontSize: 9.5, opacity: 0 }}>.</label>
+          <div>
             <button className="btn btn-primary" onClick={onRun} disabled={!canRun} style={{ height: 42 }}>
               {live ? "In session…" : "Convene ▸"}
             </button>

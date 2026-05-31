@@ -25,6 +25,7 @@ class EventType(str, Enum):
     position_update = "position_update"   # carries influenced_by
     orchestrator = "orchestrator"         # control: start/continue/converge
     verdict = "verdict"                   # final verdict object
+    extraction = "extraction"             # project-brief pipeline progress (pre-debate)
 
 
 class Stance(str, Enum):
@@ -43,6 +44,19 @@ class SessionStatus(str, Enum):
     running = "running"
     done = "done"
     error = "error"
+
+
+class ProjectStatus(str, Enum):
+    pending = "pending"        # created, files stored, extraction not started
+    extracting = "extracting"  # pipeline running
+    ready = "ready"            # brief available
+    failed = "failed"          # extraction errored (brief may be partial/empty)
+
+
+class SourceKind(str, Enum):
+    pdf = "pdf"
+    video = "video"
+    url = "url"
 
 
 # ───────────────────── core domain models ─────────────────────
@@ -91,9 +105,12 @@ class Agent(BaseModel):
     weight: float = 1.0
     voice_id: Optional[str] = None
     tools: list[str] = []
+    skills: list[str] = []                # skill-file names this agent may `use_skill` on
     position: int = 0                     # seat order in the boardroom
     structural: bool = False              # cannot be removed/re-weighted away (e.g. the Skeptic)
     veto: bool = False                    # blocks a clean YES unless it too is convinced
+    conflict_partner: Optional[str] = None    # agent_id the moderator pits this agent against
+    conflict_dimension: Optional[str] = None  # the axis of that disagreement
     created_at: Optional[datetime] = None
 
 
@@ -131,6 +148,53 @@ class Session(BaseModel):
     final_verdict: Optional[Verdict] = None
     weave_trace_url: Optional[str] = None
     parent_session: Optional[str] = None
+    project_id: Optional[str] = None       # the Project Brief that grounded this debate
+    created_at: Optional[datetime] = None
+
+
+# ───────────────────── project brief (multimodal context) ─────────────────────
+class Brief(BaseModel):
+    """The extracted understanding of a project, fused from deck + video + URL.
+
+    Every field is optional so a partial extraction (one source, or a mock run)
+    still produces a valid brief. `brief_text` (on Project) is the markdown
+    rendering that actually flows into the agents' CONTEXT slot.
+    """
+    title: str = ""
+    one_liner: str = ""
+    problem: str = ""
+    solution: str = ""
+    market: str = ""
+    traction: str = ""
+    tech: str = ""
+    business_model: str = ""
+    team: str = ""
+    risks: list[str] = []
+    asks: list[str] = []
+    summary: str = ""
+
+
+class ProjectSource(BaseModel):
+    id: str
+    project_id: str
+    kind: SourceKind
+    filename: str = ""                     # original name, or the URL for kind=url
+    content_type: Optional[str] = None
+    storage_path: Optional[str] = None     # object key in the bucket / local path / url
+    content_hash: Optional[str] = None     # sha256 — dedupe / re-extraction cache
+    bytes: int = 0
+    extracted: Optional[dict[str, Any]] = None  # per-source intermediate (inspectable)
+    created_at: Optional[datetime] = None
+
+
+class Project(BaseModel):
+    id: str
+    owner_id: Optional[str] = None
+    name: str
+    status: ProjectStatus = ProjectStatus.pending
+    brief: Optional[Brief] = None
+    brief_text: Optional[str] = None       # markdown — becomes session.context
+    error: Optional[str] = None
     created_at: Optional[datetime] = None
 
 
@@ -155,9 +219,12 @@ class AgentCreate(BaseModel):
     weight: float = 1.0
     voice_id: Optional[str] = None
     tools: list[str] = []
+    skills: list[str] = []
     position: int = 0
     structural: bool = False
     veto: bool = False
+    conflict_partner: Optional[str] = None
+    conflict_dimension: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
@@ -169,9 +236,12 @@ class AgentUpdate(BaseModel):
     weight: Optional[float] = None
     voice_id: Optional[str] = None
     tools: Optional[list[str]] = None
+    skills: Optional[list[str]] = None
     position: Optional[int] = None
     structural: Optional[bool] = None
     veto: Optional[bool] = None
+    conflict_partner: Optional[str] = None
+    conflict_dimension: Optional[str] = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -179,6 +249,7 @@ class CreateSessionRequest(BaseModel):
     question: str
     context: Optional[str] = None
     rounds: int = 3
+    project_id: Optional[str] = None       # attach a finished Project Brief as context
 
 
 class CreateSessionResponse(BaseModel):
@@ -188,6 +259,21 @@ class CreateSessionResponse(BaseModel):
 class CreateVideoSessionResponse(BaseModel):
     session_id: str
     transcript: str
+
+
+# ───────────────────── project API request / response ─────────────────────
+class CreateProjectResponse(BaseModel):
+    project_id: str
+
+
+class UpdateProjectRequest(BaseModel):
+    name: Optional[str] = None
+    brief_text: Optional[str] = None       # the user's reviewed/edited brief
+
+
+class ProjectDetail(BaseModel):
+    project: Project
+    sources: list[ProjectSource] = []
 
 
 class RerunRequest(BaseModel):
