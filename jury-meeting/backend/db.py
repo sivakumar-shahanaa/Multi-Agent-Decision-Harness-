@@ -12,8 +12,10 @@ Team schema we read (see backend/db/migrations.sql):
 
 We map that into one flat `record` the meeting uses:
   { meeting_id, subject{title,summary,details}, verdict, overall_score,
-    summary, jurors[{agent_id,name,role,weight,voice_id,stance,score,rationale}],
+    summary, confidence, agreements[], conflicts[],
+    jurors[{agent_id,name,role,weight,voice_id,stance,score,rationale,influence}],
     trace_url }
+Jurors are ordered by the verdict's influence_ranking (weights are all 1.0).
 """
 from __future__ import annotations
 
@@ -81,9 +83,24 @@ def _from_supabase(session_id: str) -> dict | None:
                 "rationale": pos.get("rationale", ""),
             }
         )
-    jurors.sort(key=lambda j: j["weight"], reverse=True)
-
     verdict = session.get("final_verdict") or {}
+    if not verdict.get("decision"):
+        # Session never finished (e.g. status='error'): no verdict to explain.
+        # Fall back to the sample rather than render an empty room.
+        return None
+
+    # All agents currently share weight 1.0, so weight is a useless sort key.
+    # The real importance signal is the orchestrator's influence_ranking; map it
+    # onto our jurors (agent_id -> influence) and order the panel by it, with the
+    # per-juror score as a tiebreaker.
+    influence = {
+        r.get("agent_id"): r.get("influence", 0.0)
+        for r in verdict.get("influence_ranking", [])
+    }
+    for j in jurors:
+        j["influence"] = influence.get(j["agent_id"], 0.0)
+    jurors.sort(key=lambda j: (j["influence"], j.get("score") or 0), reverse=True)
+
     return {
         "meeting_id": session_id,
         "subject": {
@@ -94,6 +111,9 @@ def _from_supabase(session_id: str) -> dict | None:
         "verdict": _VERDICT_MAP.get(verdict.get("decision"), verdict.get("decision", "")),
         "overall_score": verdict.get("weighted_score"),
         "summary": verdict.get("summary", ""),
+        "confidence": verdict.get("confidence"),
+        "agreements": verdict.get("key_agreements", []),
+        "conflicts": verdict.get("key_conflicts", []),
         "jurors": jurors,
         "trace_url": session.get("weave_trace_url"),
     }

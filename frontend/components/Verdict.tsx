@@ -3,9 +3,15 @@
 // reasoning the council actually produced — agreements, conflicts, dissents,
 // and who moved the room. Deep-links to the Weave trace (sponsor story §9).
 import { motion } from "framer-motion";
+import { useState } from "react";
 
 import type { Agent, Stance, Verdict as V } from "../lib/types";
 import { Eyebrow, cx } from "./ui";
+
+// Our jury-meeting backend (separate service; runs on a tunnel for the demo).
+const JURY_API = process.env.NEXT_PUBLIC_JURY_API_URL ?? "http://127.0.0.1:8000";
+// Fallback meeting when no real session id is present (e.g. demo mode).
+const DEMO_MEETING_ID = "1b6005d8-4472-4ba3-b774-5c0a39285fe5";
 
 const STANCE_VAR: Record<Stance, string> = { YES: "var(--yes)", NO: "var(--no)", CONDITIONAL: "var(--cond)" };
 const reveal = (i: number) => ({
@@ -13,10 +19,28 @@ const reveal = (i: number) => ({
   transition: { duration: 0.5, delay: 0.08 * i, ease: [0.2, 0.8, 0.2, 1] as const },
 });
 
-export function VerdictPanel({ verdict, agents, weaveUrl }: { verdict: V; agents: Agent[]; weaveUrl?: string | null }) {
+export function VerdictPanel({ verdict, agents, weaveUrl, sessionId }: { verdict: V; agents: Agent[]; weaveUrl?: string | null; sessionId?: string | null }) {
   const nameOf = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
   const color = STANCE_VAR[verdict.decision];
   const maxInfluence = Math.max(0.0001, ...verdict.influence_ranking.map((r) => r.influence));
+
+  // Email the applicant their decision + a link to join the AI-jury feedback
+  // meeting (handled by our separate jury-meeting service).
+  const [invite, setInvite] = useState<{ state: "idle" | "sending" | "sent" | "error"; msg?: string }>({ state: "idle" });
+  const sendInvite = async () => {
+    setInvite({ state: "sending" });
+    try {
+      const r = await fetch(`${JURY_API}/meeting/invite`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meeting_id: sessionId || DEMO_MEETING_ID }),
+      });
+      const d = await r.json();
+      if (d.sent) setInvite({ state: "sent", msg: `Invite emailed → ${d.to}` });
+      else setInvite({ state: "error", msg: d.reason || d.error || `HTTP ${d.status_code || r.status}` });
+    } catch (e) {
+      setInvite({ state: "error", msg: e instanceof Error ? e.message : "request failed" });
+    }
+  };
 
   return (
     <motion.section {...reveal(0)} className="panel" style={{ overflow: "hidden" }}>
@@ -112,6 +136,16 @@ export function VerdictPanel({ verdict, agents, weaveUrl }: { verdict: V; agents
             <span className="mono small">↗ Open the full reasoning trace in W&B Weave</span>
           </motion.a>
         )}
+
+        {/* Invite the applicant to the AI-jury feedback meeting for this decision. */}
+        <motion.div {...reveal(6)} className="row wrapflex" style={{ gap: 12, alignItems: "center", alignSelf: "flex-start" }}>
+          <button className="btn btn-primary" onClick={sendInvite} disabled={invite.state === "sending" || invite.state === "sent"}>
+            {invite.state === "sending" ? "Sending…" : invite.state === "sent" ? "Invite sent ✓" : "✉ Email the applicant their feedback invite"}
+          </button>
+          {invite.msg && (
+            <span className="small" style={{ color: invite.state === "error" ? "var(--no)" : "var(--muted)" }}>{invite.msg}</span>
+          )}
+        </motion.div>
       </div>
     </motion.section>
   );

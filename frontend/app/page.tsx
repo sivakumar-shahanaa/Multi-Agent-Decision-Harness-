@@ -185,7 +185,7 @@ export default function Home() {
       <div style={{ display: "flex", flexDirection: "column", gap: 22, marginTop: 22 }}>
         <Boardroom agents={agents} board={board} />
 
-        {verdict && <VerdictPanel verdict={verdict} agents={agents} weaveUrl={weaveUrl} />}
+        {verdict && <VerdictPanel verdict={verdict} agents={agents} weaveUrl={weaveUrl} sessionId={sessionId} />}
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 1fr)", gap: 22, alignItems: "start" }} className="split">
           <Inspector events={events} agents={agents} />

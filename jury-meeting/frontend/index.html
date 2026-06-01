@@ -19,7 +19,14 @@
   <div id="root"></div>
   <script type="text/babel" data-presets="react">
     const { useState, useRef } = React;
-    const API = "http://localhost:8000";
+    // Talk to our own origin so one tunnel (UI+API+audio) just works for a remote
+    // applicant. `?api=` overrides for split dev; opening the file directly falls
+    // back to local uvicorn.
+    const params = new URLSearchParams(location.search);
+    const API = params.get("api")
+      || (location.protocol === "file:" ? "http://127.0.0.1:8000" : location.origin);
+    // The applicant's join link carries the decision to replay: /?meeting_id=<session>.
+    const MEETING_ID = params.get("meeting_id") || null;
 
     // Zoom-style tile: a flat navy rectangle with the name centered. Speaker gets
     // a green frame. A tiny muted-mic glyph sits in the bottom-left like real Zoom.
@@ -63,7 +70,7 @@
 
       const start = async () => {
         setBusy(true);
-        const d = await (await fetch(`${API}/meeting/init`, {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})).json();
+        const d = await (await fetch(`${API}/meeting/init`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({meeting_id:MEETING_ID})})).json();
         setData(d); setStarted(true); setBusy(false);
         playQueue(d.openings || []);
       };
@@ -71,7 +78,7 @@
       const ask = async (q) => {
         if (!q || !q.trim() || busy) return;
         setBusy(true);
-        const t = await (await fetch(`${API}/meeting/ask`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q.trim()})})).json();
+        const t = await (await fetch(`${API}/meeting/ask`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({meeting_id:MEETING_ID,question:q.trim()})})).json();
         setBusy(false); playQueue([t]);
       };
 
@@ -92,7 +99,7 @@
       };
 
       const jurors = data?.jurors || [];
-      const tiles = [{name:"You", role:data?.subject?.title||"Applicant", you:true, recording},
+      const tiles = [{name:"You", role:"Applicant", you:true, recording},
                      ...jurors.map(j=>({name:j.name, role:j.role}))];
       const cols = tiles.length<=2?2 : tiles.length<=6?3 : 4;
 
@@ -106,8 +113,16 @@
         </div>
       );
 
+      const verdictColor = {PICK:"#36e36b",ELIMINATE:"#f04747",CONDITIONAL:"#e3b836"}[data?.verdict] || "#94a3b8";
       return (
         <div className="h-screen flex flex-col bg-black">
+          {/* slim context header: the decision + the question under review */}
+          <div className="flex items-center gap-3 px-4 py-2 border-b border-white/10 text-slate-200">
+            <span className="px-2 py-0.5 rounded text-xs font-semibold text-black" style={{background:verdictColor}}>
+              {data?.verdict||"—"}{typeof data?.overall_score==="number"?` · ${data.overall_score}/10`:""}
+            </span>
+            <span className="text-sm truncate text-slate-300">{data?.subject?.title}</span>
+          </div>
           {/* gallery — fills the screen, just like Zoom */}
           <div className="flex-1 p-3 min-h-0">
             <div className="gallery h-full" style={{gridTemplateColumns:`repeat(${cols},minmax(0,1fr))`}}>

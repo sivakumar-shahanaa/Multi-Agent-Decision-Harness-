@@ -18,10 +18,10 @@ and the subject gets a real conversation instead of a silent verdict.
 team Supabase  ──►  db.get_record(session_id)   (sample_decision.json offline fallback)
                          │  maps sessions.final_verdict + positions + agents
                          ▼
-   record = { subject, verdict, overall_score, summary,
-              jurors:[{name, role, weight, voice_id, stance, score, rationale}], trace_url }
+   record = { subject, verdict, overall_score, summary, confidence, agreements, conflicts,
+              jurors:[{name, role, weight, voice_id, stance, score, rationale, influence}], trace_url }
                          │
-   opening_statements ───┤ each juror voices its position (heaviest weight first)   @weave.op
+   opening_statements ───┤ each juror voices its position (most influential first)   @weave.op
                          ▼
    orchestrator.route(question) ──► the juror who owns it ──► answer (grounded)      @weave.op
                          ▼
@@ -48,8 +48,23 @@ and optionally `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` (blank → runs on the samp
 cd jury-meeting/backend
 python main.py                       # CLI meeting end-to-end → Weave trace URL
 python scorers.py                    # Weave Evaluation: routing relevance + faithfulness
-uvicorn api:app --reload --port 8000 # then open ../frontend/index.html
+uvicorn api:app --reload --port 8000 # serves API + audio + the UI at http://127.0.0.1:8000/
 ```
+The frontend is served from FastAPI at `/`, so one origin covers UI + API + audio.
+Open `http://127.0.0.1:8000/?meeting_id=<session_id>` to replay a real decision;
+no `meeting_id` → the offline MealMind sample.
+
+## Inviting an applicant (tunnel, no deploy)
+The mp3s are streamed over HTTP, so a tunnel forwards them like any request — nothing
+extra to host. Expose the single port and send the link:
+```bash
+cloudflared tunnel --url http://127.0.0.1:8000      # prints https://<sub>.trycloudflare.com
+```
+Join link → `https://<sub>.trycloudflare.com/?meeting_id=<session_id>`.
+
+**Next phase (not built yet):** a `POST /meeting/invite {meeting_id, email}` endpoint that
+emails this link via a provider (Resend/SMTP), so the applicant is notified automatically
+once the engine finishes their decision.
 
 ## Files
 | Path | Role |

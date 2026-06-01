@@ -27,10 +27,17 @@ def _indexed(record: dict) -> list[tuple[int, dict]]:
     return list(enumerate(record.get("jurors", [])))
 
 
+def _importance(juror: dict) -> tuple:
+    """Panel weights are all 1.0, so rank by the verdict's influence_ranking,
+    then by score, then weight as a last resort (covers the sample, which has
+    no influence data)."""
+    return (juror.get("influence", 0) or 0, juror.get("score") or 0, juror.get("weight") or 0)
+
+
 @weave.op
 def opening_statements(record: dict) -> list[dict]:
-    """Each juror delivers its verdict; heaviest-weighted speaks first."""
-    order = sorted(_indexed(record), key=lambda iv: iv[1].get("weight", 0), reverse=True)
+    """Each juror delivers its verdict; the most pivotal juror speaks first."""
+    order = sorted(_indexed(record), key=lambda iv: _importance(iv[1]), reverse=True)
     return [agents.explain(juror, record, index=i) for i, juror in order]
 
 
@@ -39,8 +46,8 @@ def route(question: str, record: dict) -> int:
     """The chair agent delegates the question to the juror who owns it.
 
     Returns a seat index. The agent decides; parsing only translates its answer
-    back to an index. If the agent's reply is unusable we default to the
-    heaviest-weighted juror (general — no hardcoded topics).
+    back to an index. If the agent's reply is unusable we default to the most
+    influential juror (general — no hardcoded topics).
     """
     jurors = record.get("jurors", [])
     if not jurors:
@@ -66,8 +73,8 @@ def route(question: str, record: dict) -> int:
     for i, j in _indexed(record):
         if j.get("name", "").lower() in low:
             return i
-    # Unusable reply -> heaviest-weighted juror (general fallback).
-    return max(_indexed(record), key=lambda iv: iv[1].get("weight", 0))[0]
+    # Unusable reply -> most influential juror (general fallback).
+    return max(_indexed(record), key=lambda iv: _importance(iv[1]))[0]
 
 
 @weave.op

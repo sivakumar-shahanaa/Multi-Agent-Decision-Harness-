@@ -28,3 +28,6 @@ supabase/.branches/
 .claude/settings.local.json
 .playwright-mcp
 .vercel
+
+# generated TTS cache (regenerated on demand)
+jury-meeting/backend/audio/

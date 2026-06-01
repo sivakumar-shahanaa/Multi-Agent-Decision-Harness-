@@ -27,8 +27,15 @@ fields we depend on; if any are routinely empty, that's the feedback.
 
 `YES → PICK`, `NO → ELIMINATE`, `CONDITIONAL → CONDITIONAL`.
 
+We also opportunistically read the rest of `final_verdict` when present —
+`confidence`, `key_agreements`, `key_conflicts`, and `influence_ranking` (used to order who
+speaks first, since `weight` is currently a flat 1.0 for every agent). All optional.
+
 ## How to point us at a real session
 
-Set `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` in `jury-meeting/backend/.env`, then call
-`POST /meeting/init {"meeting_id": "<session_id>"}`. With those unset we run on
-`backend/sample_decision.json` offline.
+Set `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` in `jury-meeting/backend/.env`, then open
+`http://<host>/?meeting_id=<session_id>` (the UI forwards it to `POST /meeting/init`). With
+those unset, or for a session with no finished verdict, we run on
+`backend/sample_decision.json` offline. The applicant join link is just that URL over a
+tunnel — see the README's "Inviting an applicant" section (an email-invite endpoint is the
+next step).
