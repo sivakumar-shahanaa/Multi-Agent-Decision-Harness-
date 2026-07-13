@@ -24,14 +24,14 @@ The entire execution pipeline is traced using **Weights & Biases Weave**, making
 
 ## Features
 
-- 🤖 Five independent specialist LLM agents
-- 🧠 Central orchestration agent for structured decision synthesis
-- ⚖️ Configurable agent weighting system
-- 👤 Human-in-the-loop override support
-- 📊 Full Weave instrumentation and tracing
-- 📈 Automated evaluation with custom scoring metrics
-- ⚡ FastAPI backend for serving orchestration requests
-- 💻 React frontend for interactive decision making
+- Five independent specialist LLM agents
+- Central orchestration agent for structured decision synthesis
+- Configurable agent weighting system
+- Human-in-the-loop override support
+- Full Weave instrumentation and tracing
+- Automated evaluation with custom scoring metrics
+- FastAPI backend for serving orchestration requests
+- React frontend for interactive decision making
 
 ---
 
